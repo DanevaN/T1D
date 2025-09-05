@@ -20,6 +20,10 @@ def analyze_hypoglycemia_treatment(data):
             max_lookhead = min(i + 24, len(data_sorted))  # Look ahead up to 24 readings (~2 hours)
             following_data = data_sorted.iloc[i+1:max_lookhead].copy()
             
+            # check if there is IOB at start if yes ignore this hypo episode
+            if row['IOB_novorapid'] > 0.1:
+                continue
+            
             if len(following_data) > 0:
                 # Check if there's no bolus in the following period
                 no_bolus = (

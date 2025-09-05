@@ -2,10 +2,21 @@ import sqlite3
 import os
 import pandas as pd
 import pytz
+import requests
+import time
+from datetime import datetime
 
 XDRIP_PATH = [r'c:\Users\nadia\Documents\Food\xDrip\export20250831-192101\export20250831-192101.sqlite',
     r'c:\Users\nadia\Documents\Food\xDrip\export20250903-113335\export20250903-113335.sqlite']
 DIABETESM_PATH = r'c:\Users\nadia\Documents\Food\Diabetesm\DiabetesM_ENTRIES.csv'
+# === NIGHTSCOUT CONFIGURATION ===
+NIGHTSCOUT_URL = "https://samince.eu.nightscoutpro.com/"  # e.g. "https://mycgm.herokuapp.com"
+API_SECRET = ""  # leave "" if not required
+OUTPUT_DB = "nightscout_data.sqlite"
+
+# === NIGHTSCOUT PARAMETERS ===
+BATCH_SIZE = 1000000
+
 def read_xDrip(table_name = 'BgReadings', xdrip_paths = XDRIP_PATH):
     ''' Reads a specified table from xDrip SQLite databases and returns it as a DataFrame. 
     Handles multiple database paths, resolves overlaps by prioritizing higher index paths.
@@ -133,3 +144,166 @@ def prepare_diabetesm():
     
     all_data = pd.concat([archived_data, current_data], ignore_index=True).sort_values('DateTime_rounded').reset_index(drop=True)
     return all_data
+
+
+
+def download_nightscout_data(start_date=None):
+    """
+    Download Nightscout data.
+    
+    Args:
+        start_date (datetime, optional): Start date for data download. If None, downloads all data.
+    
+    Returns:
+        pd.DataFrame: DataFrame containing the downloaded entries
+    """
+    # Convert datetime to Unix milliseconds if provided
+    start_date_ms = None
+    if start_date:
+        if isinstance(start_date, datetime):
+            start_date_ms = int(start_date.timestamp() * 1000)
+    
+    headers = {}
+    if API_SECRET:
+        headers["API-SECRET"] = API_SECRET
+
+    all_count = 0
+    skip = 0
+    done = False
+
+    print("Starting Nightscout download...")
+    df_output = pd.DataFrame()
+    while not done:
+        url = f"{NIGHTSCOUT_URL}/api/v1/entries.json?count={BATCH_SIZE}&skip={skip}"
+        if start_date_ms:
+            url += f"&find[date][$gte]={start_date_ms}"
+
+        r = requests.get(url, headers=headers)
+        if r.status_code != 200:
+            print(f"Error {r.status_code}: {r.text}")
+            break
+
+        entries = r.json()
+        if not entries:
+            print("No more data found.")
+            break
+
+        df_batch = pd.json_normalize(entries)
+        df_batch['Sensor Reading(mmol/L)'] = df_batch['sgv']/18
+        df_batch['datetime']= pd.to_datetime(df_batch['date'], unit='ms', utc=True).dt.tz_convert('EET')
+        df_batch = df_batch.set_index('datetime').resample('5min').agg({
+                            'Sensor Reading(mmol/L)': 'mean'  # Take average of glucose values in each 5-min window
+                        }).dropna()
+        df_batch = df_batch.reset_index()
+        df_batch['DateTime_rounded'] = df_batch['datetime'].dt.floor('5min')
+        df_batch = df_batch[['DateTime_rounded', 'Sensor Reading(mmol/L)']]
+        df_output = pd.concat([df_output, df_batch], ignore_index=True)
+
+        all_count += len(entries)
+        skip += len(entries)
+
+        print(f"Downloaded {len(entries)} entries, total {all_count}")
+
+        # If fewer than batch size returned → end reached
+        if len(entries) < BATCH_SIZE:
+            done = True
+
+        time.sleep(0.2)  # be nice to server
+    return df_output
+
+def create_nightscout_db(start_date=None):
+    """
+    Download Nightscout data and save to SQLite database.
+    
+    Args:
+        start_date (datetime, optional): Start date for data download. If None, downloads all data.
+    """
+    # Convert datetime to Unix milliseconds if provided
+    start_date_ms = None
+    if start_date:
+        if isinstance(start_date, datetime):
+            start_date_ms = int(start_date.timestamp() * 1000)
+        else:
+            raise ValueError("start_date must be a datetime object")
+    
+    # Connect to SQLite
+    conn = sqlite3.connect(OUTPUT_DB)
+    cur = conn.cursor()
+
+    # Create table for glucose entries
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS entries (
+        _id TEXT PRIMARY KEY,
+        device TEXT,
+        date INTEGER,
+        dateString TEXT,
+        sgv INTEGER,
+        direction TEXT,
+        type TEXT,
+        filtered REAL,
+        unfiltered REAL,
+        rssi INTEGER
+    )
+    """)
+    conn.commit()
+
+    headers = {}
+    if API_SECRET:
+        headers["API-SECRET"] = API_SECRET
+
+    all_count = 0
+    skip = 0
+    done = False
+
+    print("Starting Nightscout download...")
+
+    while not done:
+        url = f"{NIGHTSCOUT_URL}/api/v1/entries.json?count={BATCH_SIZE}&skip={skip}"
+        if start_date_ms:
+            url += f"&find[date][$gte]={start_date_ms}"
+
+        r = requests.get(url, headers=headers)
+        if r.status_code != 200:
+            print(f"Error {r.status_code}: {r.text}")
+            break
+
+        entries = r.json()
+        if not entries:
+            print("No more data found.")
+            break
+
+        # Insert batch into SQLite
+        for e in entries:
+            cur.execute("""
+            INSERT OR IGNORE INTO entries
+            (_id, device, date, dateString, sgv, direction, type, filtered, unfiltered, rssi)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                e.get("_id"),
+                e.get("device"),
+                e.get("date"),
+                e.get("dateString"),
+                e.get("sgv"),
+                e.get("direction"),
+                e.get("type"),
+                e.get("filtered"),
+                e.get("unfiltered"),
+                e.get("rssi")
+            ))
+
+        conn.commit()
+        all_count += len(entries)
+        skip += len(entries)
+
+        print(f"Downloaded {len(entries)} entries, total {all_count}")
+
+        # If fewer than batch size returned → end reached
+        if len(entries) < BATCH_SIZE:
+            done = True
+
+        time.sleep(0.2)  # be nice to server
+
+    print(f"\n✅ Finished! Total entries saved: {all_count}")
+    print(f"SQLite database saved to: {OUTPUT_DB}")
+
+    conn.close()
