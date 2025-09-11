@@ -276,9 +276,10 @@ def identify_glucose_events(df_data, glucose_threshold=12, lookback_hours=1, min
     
     print(f"Identifying high glucose events (>{glucose_threshold} mmol/L) and their preceding boluses...")
     
-    # Make a copy and initialize the event column
+    # Make a copy and initialize the event columns
     df_data_processed = df_data.copy()
     df_data_processed['event'] = None
+    df_data_processed['event_number'] = None
     
     # Step 1: Find all moments where glucose is above threshold
     high_glucose_mask = df_data_processed['glucose'] > glucose_threshold
@@ -289,6 +290,7 @@ def identify_glucose_events(df_data, glucose_threshold=12, lookback_hours=1, min
     # Step 2: For each high glucose moment, find earliest bolus within lookback period
     # Ensure minimum gap between event starts
     events_found = 0
+    event_number = 1
     last_event_start_time = None
     
     for idx, row in high_glucose_moments.iterrows():
@@ -315,8 +317,10 @@ def identify_glucose_events(df_data, glucose_threshold=12, lookback_hours=1, min
             # Check minimum gap between events
             if last_event_start_time is None or (earliest_bolus_time - last_event_start_time) >= pd.Timedelta(hours=min_gap_hours):
                 df_data_processed.loc[earliest_bolus_idx, 'event'] = 'start'
+                df_data_processed.loc[earliest_bolus_idx, 'event_number'] = event_number
                 last_event_start_time = earliest_bolus_time
                 events_found += 1
+                event_number += 1
     
     print(f"Successfully identified {events_found} insulin bolus events preceding high glucose moments")
     
@@ -324,15 +328,15 @@ def identify_glucose_events(df_data, glucose_threshold=12, lookback_hours=1, min
     print("Identifying when glucose returns to start event glucose level...")
     
     start_events = df_data_processed[df_data_processed['event'] == 'start'].copy()
-    start_times_and_glucose = [(row['DateTime_rounded'], row['glucose']) for _, row in start_events.iterrows()]
-    start_times_and_glucose.sort()
+    start_events_data = [(row['DateTime_rounded'], row['glucose'], row['event_number']) for _, row in start_events.iterrows()]
+    start_events_data.sort()
     
     ends_found = 0
     
-    for i, (start_time, start_glucose) in enumerate(start_times_and_glucose):
+    for i, (start_time, start_glucose, event_num) in enumerate(start_events_data):
         # Determine the end of this event period (before next event or end of data)
-        if i < len(start_times_and_glucose) - 1:
-            period_end = start_times_and_glucose[i + 1][0]  # Next start time
+        if i < len(start_events_data) - 1:
+            period_end = start_events_data[i + 1][0]  # Next start time
         else:
             period_end = df_data_processed['DateTime_rounded'].max()
         
@@ -355,6 +359,7 @@ def identify_glucose_events(df_data, glucose_threshold=12, lookback_hours=1, min
             if len(crossing_points) > 0:
                 first_crossing_idx = crossing_points.index[0]
                 df_data_processed.loc[first_crossing_idx, 'event'] = 'end'
+                df_data_processed.loc[first_crossing_idx, 'event_number'] = event_num
                 ends_found += 1
     
     print(f"Successfully identified {ends_found} end events")
@@ -369,7 +374,7 @@ def identify_glucose_events(df_data, glucose_threshold=12, lookback_hours=1, min
         print(f"End events: {len(events_summary[events_summary['event'] == 'end'])}")
         
         # Show event details
-        display_columns = ['DateTime_rounded', 'glucose', 'carb_bolus', 'correction_bolus', 'event']
+        display_columns = ['DateTime_rounded', 'glucose', 'carb_bolus', 'correction_bolus', 'event', 'event_number']
         print("\nFirst few events:")
         print(events_summary[display_columns].head(10).to_string(index=False))
     else:

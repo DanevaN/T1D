@@ -6,9 +6,9 @@ import requests
 import time
 from datetime import datetime
 
-XDRIP_PATH = [r'c:\Users\nadia\Documents\Food\xDrip\export20250831-192101\export20250831-192101.sqlite',
-    r'c:\Users\nadia\Documents\Food\xDrip\export20250903-113335\export20250903-113335.sqlite']
-DIABETESM_PATH = r'c:\Users\nadia\Documents\Food\Diabetesm\DiabetesM_ENTRIES.csv'
+XDRIP_PATH = ['./xDrip/export20250831-192101/export20250831-192101.sqlite',
+    '/xDrip/export20250903-113335/export20250903-113335.sqlite']
+DIABETESM_PATH = './Diabetesm/DiabetesM_ENTRIES.csv'
 # === NIGHTSCOUT CONFIGURATION ===
 NIGHTSCOUT_URL = "https://samince.eu.nightscoutpro.com/"  # e.g. "https://mycgm.herokuapp.com"
 API_SECRET = ""  # leave "" if not required
@@ -140,7 +140,7 @@ def prepare_diabetesm():
     current_data = read_diabetesm()
     current_data = current_data[current_data['DateTime_rounded']>=pd.Timestamp('2025-08-25 08:45:00+03:00')]  # Filter for entries after Jan 1, 2023
 
-    archived_data = read_diabetesm(r'c:\Users\nadia\Documents\Food\Diabetesm\DiabetesM_ENTRIES_to_20250825.csv')
+    archived_data = read_diabetesm(r'c:/Users/nadia/Documents/Food/Diabetesm/DiabetesM_ENTRIES_to_20250825.csv')
     
     all_data = pd.concat([archived_data, current_data], ignore_index=True).sort_values('DateTime_rounded').reset_index(drop=True)
     return all_data
@@ -303,7 +303,7 @@ def create_nightscout_db(start_date=None):
 
         time.sleep(0.2)  # be nice to server
 
-    print(f"\n✅ Finished! Total entries saved: {all_count}")
+    print(f"/n✅ Finished! Total entries saved: {all_count}")
     print(f"SQLite database saved to: {OUTPUT_DB}")
 
     conn.close()
