@@ -190,12 +190,16 @@ def download_nightscout_data(start_date=None):
 
         df_batch = pd.json_normalize(entries)
         df_batch['Sensor Reading(mmol/L)'] = df_batch['sgv']/18
-        df_batch['datetime']= pd.to_datetime(df_batch['date'], unit='ms', utc=True).dt.tz_convert('EET')
-        df_batch = df_batch.set_index('datetime').resample('5min').agg({
+        df_batch['datetime_utc']= pd.to_datetime(df_batch['date'], unit='ms', utc=True)
+        df_batch['datetime']=df_batch['datetime_utc'].dt.tz_convert('EET')
+        #df_batch['datetime']= pd.to_datetime(df_batch['dateString'], utc=True).dt.tz_convert('EET')
+        
+        df_batch = df_batch.set_index('datetime_utc').resample('5min').agg({
                             'Sensor Reading(mmol/L)': 'mean'  # Take average of glucose values in each 5-min window
                         }).dropna()
         df_batch = df_batch.reset_index()
-        df_batch['DateTime_rounded'] = df_batch['datetime'].dt.floor('5min')
+        df_batch['DateTime_rounded_utc'] = df_batch['datetime_utc'].dt.floor('5min')
+        df_batch['DateTime_rounded'] = df_batch['DateTime_rounded_utc'].dt.tz_convert('EET')
         df_batch = df_batch[['DateTime_rounded', 'Sensor Reading(mmol/L)']]
         df_output = pd.concat([df_output, df_batch], ignore_index=True)
 

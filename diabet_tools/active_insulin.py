@@ -6,7 +6,7 @@ K_ABS_NOVORAPID = 3.0  # absorption rate constant (1/hr)
 K_ELIM_NOVORAPID = 0.8  # elimination rate constant (1/hr)  
 K_ABS_TRESIBA = 0.3   # very slow absorption rate constant (1/hr)
 K_ELIM_TRESIBA = 0.03 # very slow elimination rate constant (1
-
+# Insulin on board at t = 1 - Cumulative active insulin = 1 - integral of active insulin from 0 to t
 def active_insulin(t,type='novorapid'):
     """
     NovoRapid (insulin aspart) action profile for 1 unit
@@ -39,7 +39,7 @@ def active_insulin(t,type='novorapid'):
         return 0
     
         # Bi-exponential model: absorption - elimination
-    active_insulin = k_elim * k_abs * (np.exp(-k_elim * t) - np.exp(-k_abs * t)) / (k_abs - k_elim)
+    active_insulin = k_elim * k_abs * (-np.exp(-k_elim * t) + np.exp(-k_abs * t)) / (k_abs - k_elim)
     
        
     return max(0, active_insulin)
